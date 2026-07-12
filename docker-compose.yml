@@ -1,0 +1,48 @@
+version: "3.8"
+
+# Local development environment for Alpha Vault
+# Provides a Midnight proof server and devnet node
+
+services:
+  proof-server:
+    image: midnightntwrk/proof-server:latest
+    container_name: alpha-vault-proof-server
+    ports:
+      - "6300:6300"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6300/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  devnet:
+    image: midnightntwrk/devnet:latest
+    container_name: alpha-vault-devnet
+    ports:
+      - "9944:9944"
+      - "8888:8888"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9944/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  indexer:
+    image: midnightntwrk/indexer:latest
+    container_name: alpha-vault-indexer
+    ports:
+      - "8080:8080"
+    depends_on:
+      devnet:
+        condition: service_healthy
+    environment:
+      - NODE_URL=ws://devnet:9944
+      - RUST_LOG=info
+    restart: unless-stopped

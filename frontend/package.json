@@ -1,0 +1,41 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/dapp-connector-api": "^4.0.0",
+    "@midnight-ntwrk/midnight-js-contracts": "latest",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "latest",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "latest",
+    "@midnight-ntwrk/midnight-js-network-id": "latest",
+    "@midnight-ntwrk/compact-runtime": "latest",
+    "@midnight-ntwrk/onchain-runtime": "latest",
+    "framer-motion": "^11.0.0",
+    "lucide-react": "^0.400.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0",
+    "recharts": "^2.12.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "eslint": "^9.0.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.3.0"
+  }
+}

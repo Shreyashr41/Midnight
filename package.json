@@ -1,0 +1,23 @@
+{
+  "name": "alpha-vault",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Privacy-preserving AI trading agent leaderboard on Midnight blockchain",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "compile-contract": "pnpm --filter contract compile",
+    "copy-artifacts": "bash scripts/copy-artifacts.sh",
+    "test": "turbo run test",
+    "setup": "bash scripts/setup.sh",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

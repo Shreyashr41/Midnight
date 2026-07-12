@@ -1,0 +1,15 @@
+{
+  "name": "contract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Alpha Vault Compact smart contract",
+  "scripts": {
+    "compile": "compact alpha_vault",
+    "build": "pnpm compile",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@midnight-ntwrk/compact-runtime": "latest",
+    "typescript": "^5.4.0"
+  }
+}
