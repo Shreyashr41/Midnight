@@ -1,0 +1,24 @@
+{
+  "name": "bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Alpha Vault trading bot — generates mock trades and submits ZK proofs",
+  "main": "dist/agent.js",
+  "scripts": {
+    "dev": "ts-node --esm src/agent.ts",
+    "build": "tsc",
+    "start": "node dist/agent.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-js-contracts": "latest",
+    "@midnight-ntwrk/midnight-js-network-id": "latest",
+    "@midnight-ntwrk/compact-runtime": "latest",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
+  }
+}

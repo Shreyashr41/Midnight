@@ -1,0 +1,259 @@
+// Alpha Vault — Compact Smart Contract
+// Privacy-preserving AI trading agent leaderboard on Midnight
+//
+// SYNTAX NOTE: This contract is written using best-approximation Compact syntax
+// based on official Midnight docs (https://docs.midnight.network/compact).
+// Items marked [VERIFY] should be checked against the actual Compact compiler
+// before production use, as Compact is actively evolving.
+//
+// Key design decisions:
+// - Private trade logs never appear in public ledger state
+// - proveThreshold uses ZK proof to attest performance without revealing trades
+// - Leaderboard entries contain only proven claims + commitments
+
+pragma language_version >= 1.0.0;                                    // [VERIFY] version pragma syntax
+
+import CompactStandardLibrary;                                        // [VERIFY] stdlib import
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A single trade entry stored in the private witness
+struct TradeEntry {
+  timestamp:   Uint<64>;    // Unix timestamp (seconds)
+  return_bps:  Int<32>;     // Basis points: 100 = 1%, can be negative
+  asset_id:    Uint<16>;    // Mock asset identifier
+}
+
+// Public leaderboard entry — NO private data here
+struct LeaderboardEntry {
+  proof_commitment:   Bytes<32>;   // Pedersen commitment to the private trade log
+  claimed_return_bps: Int<32>;     // The return the agent proved (in basis points)
+  epoch:             Uint<32>;     // Epoch this proof covers
+  vault_balance:     Uint<64>;     // Total mock tokens deposited
+  proof_passed:      Boolean;      // Whether the threshold proof passed
+  agent_name:        Bytes<32>;    // UTF-8 encoded agent display name (padded)
+}
+
+// Proof result written to public state after proveThreshold
+struct ProofRecord {
+  epoch:      Uint<32>;
+  threshold:  Int<32>;     // The threshold that was proved against (bps)
+  passed:     Boolean;
+  commitment: Bytes<32>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEDGER (PUBLIC STATE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+ledger {
+  // Map from agent address bytes to their leaderboard entry
+  // [VERIFY] Map syntax: `Map<KeyType, ValueType>`
+  leaderboard: Map<Bytes<32>, LeaderboardEntry>;
+
+  // Total number of registered agents
+  agent_count: Uint<32>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WITNESSES (PRIVATE STATE — never exported to public ledger)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Private trade log for a given agent. This witness is stored client-side
+// by the prover and never revealed on-chain.
+// [VERIFY] Witness declaration syntax
+witness agent_trade_log(): Vector<TradeEntry, 256>;   // Up to 256 trades per epoch
+
+// Running commitment accumulator (private)
+witness trade_commitment(): Bytes<32>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CIRCUITS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// commit_trade
+// Agent privately appends a trade entry to their log and updates the
+// running Pedersen-style commitment. Only the updated commitment is
+// written to public state — raw trade data stays in the witness.
+//
+// Parameters:
+//   agent_id    — 32-byte agent identity (derived from 1AM wallet address)
+//   entry       — the TradeEntry to append (timestamp, return_bps, asset_id)
+//   agent_name  — display name for leaderboard (first call registers agent)
+//
+// [VERIFY] Circuit declaration and parameter syntax
+circuit commit_trade(
+  agent_id:   Bytes<32>,
+  entry:      TradeEntry,
+  agent_name: Bytes<32>
+): [] {
+  // Fetch current private log from witness
+  const current_log: Vector<TradeEntry, 256> = agent_trade_log();
+
+  // Compute a new commitment = hash(old_commitment || entry_bytes)
+  // [VERIFY] Built-in hash primitive name; Compact may use `sha256`, `poseidon`, or `blake2`
+  const old_commitment: Bytes<32> = trade_commitment();
+  const entry_bytes: Bytes<16> = serialize_entry(entry);
+  const new_commitment: Bytes<32> = sha256(old_commitment ++ entry_bytes);  // [VERIFY] ++ concat op
+
+  // Update public leaderboard entry (commitment only — no trade data)
+  const existing: LeaderboardEntry = leaderboard[agent_id] ?? LeaderboardEntry {
+    proof_commitment:   new_commitment,
+    claimed_return_bps: 0 as Int<32>,
+    epoch:              0 as Uint<32>,
+    vault_balance:      0 as Uint<64>,
+    proof_passed:       false,
+    agent_name:         agent_name,
+  };
+
+  leaderboard[agent_id] = LeaderboardEntry {
+    proof_commitment:   new_commitment,
+    claimed_return_bps: existing.claimed_return_bps,
+    epoch:              existing.epoch,
+    vault_balance:      existing.vault_balance,
+    proof_passed:       existing.proof_passed,
+    agent_name:         existing.agent_name == zeros(32) ? agent_name : existing.agent_name,
+  };
+
+  // Update agent count if new agent
+  // [VERIFY] Map membership test syntax
+  if !(agent_id in leaderboard) {
+    agent_count = agent_count + (1 as Uint<32>);
+  }
+}
+
+// prove_threshold
+// ZK proof circuit: takes private trade log as witness, computes the
+// cumulative return in-circuit, asserts it meets the threshold,
+// and writes ONLY {epoch, threshold, passed, commitment} to public state.
+// Raw trades are NEVER revealed.
+//
+// Parameters:
+//   agent_id       — agent identity
+//   epoch          — the epoch this proof covers
+//   threshold_bps  — the minimum cumulative return to assert (basis points)
+//
+circuit prove_threshold(
+  agent_id:      Bytes<32>,
+  epoch:         Uint<32>,
+  threshold_bps: Int<32>
+): Boolean {
+  // Pull private log from witness (stays in ZK proof; never on-chain)
+  const trade_log: Vector<TradeEntry, 256> = agent_trade_log();
+  const commitment: Bytes<32> = trade_commitment();
+
+  // Compute cumulative return in-circuit
+  // [VERIFY] Vector fold / iteration syntax in Compact
+  var cumulative_return: Int<64> = 0 as Int<64>;
+  var i: Uint<32> = 0 as Uint<32>;
+  while i < length(trade_log) {                   // [VERIFY] `length` on Vector
+    const t: TradeEntry = trade_log[i];
+    cumulative_return = cumulative_return + (t.return_bps as Int<64>);
+    i = i + (1 as Uint<32>);
+  }
+
+  // Assert the claimed return meets threshold
+  // This assertion becomes part of the ZK proof — if false, the circuit rejects
+  const passed: Boolean = cumulative_return >= (threshold_bps as Int<64>);
+  assert(passed);                                  // [VERIFY] assert() syntax
+
+  // Write proof record to public leaderboard — NO raw data
+  const existing: LeaderboardEntry = leaderboard[agent_id] ?? LeaderboardEntry {
+    proof_commitment:   commitment,
+    claimed_return_bps: threshold_bps,
+    epoch:              epoch,
+    vault_balance:      0 as Uint<64>,
+    proof_passed:       true,
+    agent_name:         zeros(32),
+  };
+
+  leaderboard[agent_id] = LeaderboardEntry {
+    proof_commitment:   commitment,
+    claimed_return_bps: threshold_bps,
+    epoch:              epoch,
+    vault_balance:      existing.vault_balance,
+    proof_passed:       true,
+    agent_name:         existing.agent_name,
+  };
+
+  return true;
+}
+
+// deposit
+// Mock vault mechanic: increase an agent's vault balance.
+// In a real deployment this would interact with Midnight's coin primitives.
+// For MVP: tracks balances in the public leaderboard map.
+//
+// Parameters:
+//   agent_id — the agent to deposit into
+//   amount   — mock token amount (denominated in smallest units)
+//
+circuit deposit(
+  agent_id: Bytes<32>,
+  amount:   Uint<64>
+): [] {
+  assert(amount > (0 as Uint<64>));
+
+  const existing: LeaderboardEntry = leaderboard[agent_id] ?? LeaderboardEntry {
+    proof_commitment:   zeros(32),
+    claimed_return_bps: 0 as Int<32>,
+    epoch:              0 as Uint<32>,
+    vault_balance:      0 as Uint<64>,
+    proof_passed:       false,
+    agent_name:         zeros(32),
+  };
+
+  leaderboard[agent_id] = LeaderboardEntry {
+    proof_commitment:   existing.proof_commitment,
+    claimed_return_bps: existing.claimed_return_bps,
+    epoch:              existing.epoch,
+    vault_balance:      existing.vault_balance + amount,
+    proof_passed:       existing.proof_passed,
+    agent_name:         existing.agent_name,
+  };
+}
+
+// withdraw
+// Mock vault withdrawal. Asserts sufficient balance exists.
+//
+circuit withdraw(
+  agent_id: Bytes<32>,
+  amount:   Uint<64>
+): [] {
+  assert(amount > (0 as Uint<64>));
+
+  // Agent must exist with sufficient balance
+  const existing: LeaderboardEntry = leaderboard[agent_id];    // [VERIFY] non-optional map access
+  assert(existing.vault_balance >= amount);
+
+  leaderboard[agent_id] = LeaderboardEntry {
+    proof_commitment:   existing.proof_commitment,
+    claimed_return_bps: existing.claimed_return_bps,
+    epoch:              existing.epoch,
+    vault_balance:      existing.vault_balance - amount,
+    proof_passed:       existing.proof_passed,
+    agent_name:         existing.agent_name,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Serialize a TradeEntry to 16 bytes for hashing
+// Layout: 8 bytes timestamp | 4 bytes return_bps | 2 bytes asset_id | 2 bytes padding
+// [VERIFY] byte serialization / struct-to-bytes primitive
+pure function serialize_entry(entry: TradeEntry): Bytes<16> {
+  return as_bytes(entry.timestamp)                          // [VERIFY] as_bytes() primitive
+    ++ as_bytes(entry.return_bps)
+    ++ as_bytes(entry.asset_id)
+    ++ (0x0000 as Bytes<2>);
+}
+
+// Return a zero-filled byte array of given size
+// [VERIFY] zeros() builtin or equivalent
+pure function zeros(n: Uint<8>): Bytes<32> {
+  return 0x0000000000000000000000000000000000000000000000000000000000000000 as Bytes<32>;
+}
